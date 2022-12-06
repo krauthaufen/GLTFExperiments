@@ -13,6 +13,9 @@
       <PackageReference Include="Aardvark.Application.Utilities" Version="5.3.3" />
       <PackageReference Include="Aardvark.Base" Version="5.2.17" />
       <PackageReference Include="Aardvark.Base.FSharp" Version="5.2.17" />
+      <PackageReference Include="Aardvark.Base.Essentials" Version="5.2.17" />
+      <PackageReference Include="Aardvark.Base.Incremental" Version="5.2.17" />
+      <PackageReference Include="Aardvark.Base.Runtime" Version="5.2.17" />
       <PackageReference Include="Aardvark.Rendering" Version="5.3.3" />
       <PackageReference Include="Aardvark.Geometry" Version="5.2.17" />
       <PackageReference Include="Aardvark.SceneGraph" Version="5.3.3" />

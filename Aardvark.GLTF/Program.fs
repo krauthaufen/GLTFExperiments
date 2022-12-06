@@ -9,6 +9,7 @@ open Aardvark.Rendering
 open Microsoft.FSharp.NativeInterop
 open Aardvark.SceneGraph
 
+#nowarn "9"
 
 Aardvark.Init()
 
@@ -234,15 +235,6 @@ module GLTF =
             
         trafo
             
-    
-    let private getSemantic (name : string) =
-        match name.ToLower().Trim() with
-        | "position" | "positions" -> DefaultSemantic.Positions
-        | "normal" | "normals" -> DefaultSemantic.Normals
-        | "texcoord_0" -> DefaultSemantic.DiffuseColorCoordinates
-        | "color_0" -> DefaultSemantic.Colors
-        | _ -> Symbol.Create name
-    
     let private toScene (file : string) (model : Gltf) =
         
         let bufferCache = Dict<int, byte[]>()
@@ -528,180 +520,6 @@ module GLTF =
         let model = Interface.LoadModel file
         toScene file model
     
-    let tryLoad (file : string) =
-        use stream = File.OpenRead file
-        let model = Interface.LoadModel stream
-       
-        exit 0
-        
-        let bufferCache = Dict<int, byte[]>()
-        
-        let readBuffer (i : int) =
-            bufferCache.GetOrCreate(i, fun i ->
-                model.LoadBinaryBuffer(i, file)    
-            )
-        
-        if model.Scene.HasValue then
-            let scene = model.Scenes.[model.Scene.Value]
-            
-            let map (mapping : 'a -> 'b) (arr : 'a[]) =
-                let res = Array.zeroCreate arr.Length
-                for i in 0 .. arr.Length - 1 do
-                    res.[i] <- mapping arr.[i]
-                res
-            
-            let mutable dasdasd = false
-            
-            let imageTextures =
-                model.Images |> Array.map (fun img ->
-                    let view = model.BufferViews.[img.BufferView.Value]
-                    
-                    let buffer = readBuffer view.Buffer
-                    let mem = System.Memory<byte>(buffer, view.ByteOffset, view.ByteLength)
-                    
-                    let pimg = 
-                        use ms = new MemoryStream(buffer, view.ByteOffset, view.ByteLength)
-                        PixImage.Load(ms)
-                           
-                    let pimg =
-                        if pimg.Format = Col.Format.Gray then
-                            pimg.Visit {
-                                new IPixImageVisitor<PixImage> with
-                                    member x.Visit(a : PixImage<'a>) =
-                                        a.ToFormat Col.Format.RGBA :> PixImage
-                            }
-                        else
-                            pimg
-                           
-                    PixTexture2d (PixImageMipMap [| pimg |], TextureParams.mipmapped) :> ITexture
-                )
-            
-            let geometries = 
-                model.Meshes |> map (fun m ->
-                    if not (isNull m.Weights) && m.Weights.Length > 0 then failwith "NO MORPHING"
-                    
-                    m.Primitives |> map (fun p ->
-                        let index, indexRange =
-                            if p.Indices.HasValue then
-                                let acc = model.Accessors.[p.Indices.Value]
-                                let minIndex = if isNull acc.Min then 0 else int acc.Min.[0]
-                                let maxIndex = if isNull acc.Max then System.Int32.MaxValue else int acc.Max.[0]
-                                getAttributeArray readBuffer model p.Indices.Value, Some (Range1i(minIndex, maxIndex))
-                            else
-                                null, None
-                                
-                        let attributes =
-                            p.Attributes |> Seq.map (fun (KeyValue(name, att)) ->
-                                let arr = getAttributeArray readBuffer model att
-                                // match indexRange with
-                                // | Some r ->
-                                //     if r.Min <> 0 || arr.Length <> r.Max + 1 then Log.warn "asdasdasd"
-                                // | _ ->
-                                //     ()
-                                
-                                let arr =
-                                    if name.StartsWith "TEXCOORD" then flipY arr
-                                    else arr
-                                
-                                getSemantic name, arr
-                            )
-                            |> SymDict.ofSeq
-                            
-                        let mode =
-                            match p.Mode with
-                            | MeshPrimitive.ModeEnum.POINTS -> IndexedGeometryMode.PointList
-                            | MeshPrimitive.ModeEnum.LINES -> IndexedGeometryMode.LineList
-                            | MeshPrimitive.ModeEnum.LINE_STRIP -> IndexedGeometryMode.LineStrip
-                            | MeshPrimitive.ModeEnum.TRIANGLES -> IndexedGeometryMode.TriangleList
-                            | MeshPrimitive.ModeEnum.TRIANGLE_STRIP -> IndexedGeometryMode.TriangleStrip
-                            | m -> failwithf "bad mode: %A" m // TODO: convert to TriangleList indices??
-                         
-                        let geometry =
-                            IndexedGeometry(
-                                Mode = mode,
-                                IndexArray = index,
-                                IndexedAttributes = attributes
-                            )
-                            
-                        let mutable sg = Sg.ofIndexedGeometry geometry
-                        
-                        if p.Material.HasValue then
-                            let mat = model.Materials.[p.Material.Value]
-                            
-                            let bct = mat.PbrMetallicRoughness.BaseColorTexture
-                            if not (isNull bct) then
-                                let tex = model.Textures.[bct.Index]
-                                let img = imageTextures.[tex.Source.Value]
-                                sg <- sg |> Sg.diffuseTexture' img
-                        sg
-                        
-                    )
-                )
-            
-            
-            scene.Nodes |> Array.map (fun rootId ->
-                let rec visit (nodeId : int) =
-                    let node = model.Nodes.[nodeId]
-                    
-                    let trafo = 
-                        let mutable trafo = Trafo3d.Identity
-                        
-                        if not (isNull node.Matrix) then
-                            let m = node.Matrix
-                            let fw =
-                                M44d(
-                                    float m.[0], float m.[4], float m.[8], float m.[12],
-                                    float m.[1], float m.[5], float m.[9], float m.[13],
-                                    float m.[2], float m.[6], float m.[10], float m.[14],
-                                    float m.[3], float m.[7], float m.[11], float m.[15]
-                                )
-                            trafo <- trafo * Trafo3d(fw, fw.Inverse)
-                            
-                        if not (isNull node.Scale) then
-                            let s = node.Scale
-                            trafo <- trafo * Trafo3d.Scale(float s.[0], float s.[1], float s.[2])
-                        
-                        if not (isNull node.Rotation) then
-                            let q = node.Rotation
-                            let q = QuaternionD(float q.[3], float q.[0], float q.[1], float q.[2])
-                            let q = Rot3d(q.Normalized)
-                            
-                            let q : Trafo3d = q |> Rot3d.op_Explicit
-                            trafo <- trafo * q
-                            
-                        if not (isNull node.Translation) then
-                            let t = node.Translation
-                            trafo <- trafo * Trafo3d.Translation(V3d(float t.[0], float t.[1], float t.[2]))
-                            
-                        trafo
-                        
-                        
-                        
-                    let sg =
-                        if node.Mesh.HasValue then
-                            let meshes = geometries.[node.Mesh.Value]
-                            meshes |> Sg.ofArray
-                        else
-                            Sg.empty
-                            
-                    let childSg = 
-                        if not (isNull node.Children) then
-                            node.Children |> Seq.map (fun ci ->
-                                visit ci
-                            )
-                            |> Sg.ofSeq
-                        else
-                            Sg.empty
-                       
-                    Sg.ofList [sg; childSg]
-                    |> Sg.trafo' trafo
-                    
-                visit rootId
-            )
-            |> Sg.ofArray
-        else
-            failwith "bad model"
-   
    
 module Mesh =
     let toSg (scene : Scene) (textures : HashMap<ImageId, aval<ITexture>>) (m : Mesh) =
