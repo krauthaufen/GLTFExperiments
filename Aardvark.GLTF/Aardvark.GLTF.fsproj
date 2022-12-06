@@ -6,6 +6,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Compile Include="Scene.fs" />
+        <Compile Include="SceneGraph.fs" />
+        <Compile Include="GLTF.fs" />
         <Compile Include="Program.fs" />
     </ItemGroup>
 
