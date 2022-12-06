@@ -8,6 +8,12 @@ open Aardvark.SceneGraph
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Scene =
     
+    let private white =
+        let img = PixImage<byte>(Col.Format.RGBA, V2i.II)
+        img.GetMatrix<C4b>().Set(C4b.White) |> ignore
+        PixTexture2d(PixImageMipMap [| img :> PixImage  |], TextureParams.empty) :> ITexture |> AVal.constant
+        
+        
     let private meshSg (scene : Scene) (textures : HashMap<ImageId, aval<ITexture>>) (m : Mesh) =
         let tc =
             m.TexCoords |> Seq.tryFind (fun (_, set) -> HashSet.contains TexCoordSemantic.BaseColor set)
@@ -39,7 +45,7 @@ module Scene =
             |> (match m.Normals with | Some n -> Sg.vertexAttribute' DefaultSemantic.Normals n | None -> Sg.vertexBufferValue' DefaultSemantic.Normals V3f.Zero)
             |> (match m.Colors with | Some n -> Sg.vertexAttribute' DefaultSemantic.Colors n | None -> Sg.vertexBufferValue' DefaultSemantic.Colors V4f.IIII)
             |> (match tc with | Some(att,_) -> Sg.vertexAttribute' DefaultSemantic.DiffuseColorCoordinates att | None -> Sg.vertexBufferValue' DefaultSemantic.DiffuseColorCoordinates V2f.Zero)
-            |> (match diffuseTexture with | Some t -> Sg.diffuseTexture t| None -> Sg.diffuseTexture DefaultTextures.checkerboard)
+            |> (match diffuseTexture with | Some t -> Sg.diffuseTexture t| None -> Sg.diffuseTexture white)
             
         sg
         
@@ -55,5 +61,6 @@ module Scene =
             |> Sg.trafo' node.Trafo
             
         traverse scene.RootNode
-
+        |> Sg.diffuseTexture DefaultTextures.checkerboard
+        
 

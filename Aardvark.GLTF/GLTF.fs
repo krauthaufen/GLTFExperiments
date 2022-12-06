@@ -314,9 +314,13 @@ module GLTF =
                                         | (true, id) ->
                                             match arr with
                                             | :? array<V2f> as arr ->
-                                                match HashMap.tryFind id tcMapping with
-                                                | Some tcId -> Some (arr, tcId)
-                                                | None -> None
+                                                if HashMap.isEmpty tcMapping && id = 0 then
+                                                    let all = HashSet.ofList [TexCoordSemantic.BaseColor]
+                                                    Some(arr, all)
+                                                else
+                                                    match HashMap.tryFind id tcMapping with
+                                                    | Some tcId -> Some (arr, tcId)
+                                                    | None -> None
                                             | arr ->
                                                 Log.warn "bad TexCoord type: %A" arr
                                                 None
