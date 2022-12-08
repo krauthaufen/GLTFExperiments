@@ -6,6 +6,18 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <EmbeddedResource Include="CubeMap\miramar_bk.png" />
+        <EmbeddedResource Include="CubeMap\miramar_dn.png" />
+        <EmbeddedResource Include="CubeMap\miramar_ft.png" />
+        <EmbeddedResource Include="CubeMap\miramar_lf.png" />
+        <EmbeddedResource Include="CubeMap\miramar_rt.png" />
+        <EmbeddedResource Include="CubeMap\miramar_up.png" />
+        <EmbeddedResource Include="CubeMap\chapel_bk.png" />
+        <EmbeddedResource Include="CubeMap\chapel_dn.png" />
+        <EmbeddedResource Include="CubeMap\chapel_ft.png" />
+        <EmbeddedResource Include="CubeMap\chapel_lf.png" />
+        <EmbeddedResource Include="CubeMap\chapel_rt.png" />
+        <EmbeddedResource Include="CubeMap\chapel_up.png" />
         <Compile Include="Scene.fs" />
         <Compile Include="SceneGraph.fs" />
         <Compile Include="GLTF.fs" />
@@ -22,6 +34,7 @@
       <PackageReference Include="Aardvark.Rendering" Version="5.3.3" />
       <PackageReference Include="Aardvark.Geometry" Version="5.2.17" />
       <PackageReference Include="Aardvark.SceneGraph" Version="5.3.3" />
+      <PackageReference Include="FSharp.Data.Adaptive" Version="1.2.13" />
       <PackageReference Include="glTF2Loader" Version="1.1.4-alpha" />
     </ItemGroup>
 

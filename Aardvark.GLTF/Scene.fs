@@ -1,57 +1,30 @@
 namespace Aardvark.GLTF
 
+open System.Threading
 open Aardvark.Base
 open Aardvark.Rendering
 open FSharp.Data.Adaptive
 
-[<Struct; CustomEquality; CustomComparison>]
-type MaterialId private (value : System.Guid) =
-    member private x.Value = value
-    override x.GetHashCode() = Unchecked.hash value
-    override x.Equals(o) =
-        match o with
-        | :? MaterialId as other -> value = other.Value
-        | _ -> false
-        
-        
-    static member New() = MaterialId(System.Guid.NewGuid())
-        
-    interface System.IComparable with
-        member x.CompareTo(o) =
-            value.CompareTo((o :?> MaterialId).Value)
-  
-        
-[<Struct; CustomEquality; CustomComparison>]
-type ImageId private (value : System.Guid) =
-    member private x.Value = value
-    override x.GetHashCode() = Unchecked.hash value
-    override x.Equals(o) =
-        match o with
-        | :? ImageId as other -> value = other.Value
-        | _ -> false
-        
-        
-    static member New() = ImageId(System.Guid.NewGuid())
-        
-    interface System.IComparable with
-        member x.CompareTo(o) =
-            value.CompareTo((o :?> ImageId).Value)
-        
-[<Struct; CustomEquality; CustomComparison>]
-type MeshId private (value : System.Guid) =
-    member private x.Value = value
-    override x.GetHashCode() = Unchecked.hash value
-    override x.Equals(o) =
-        match o with
-        | :? MeshId as other -> value = other.Value
-        | _ -> false
-        
-        
-    static member New() = MeshId(System.Guid.NewGuid())
-        
-    interface System.IComparable with
-        member x.CompareTo(o) =
-            value.CompareTo((o :?> MeshId).Value)
+[<Struct; StructuredFormatDisplay("{AsString}")>]
+type MaterialId private (value : int) =
+    static let mutable currentId = -1
+    static member New() = MaterialId(Interlocked.Increment(&currentId))
+    override x.ToString() = string value
+    member private x.AsString = x.ToString()
+   
+[<Struct; StructuredFormatDisplay("{AsString}")>]
+type ImageId private (value : int) =
+    static let mutable currentId = -1
+    static member New() = ImageId(Interlocked.Increment(&currentId))
+    override x.ToString() = string value
+    member private x.AsString = x.ToString()
+
+[<Struct; StructuredFormatDisplay("{AsString}")>]
+type MeshId private (value : int) =
+    static let mutable currentId = -1
+    static member New() = MeshId(Interlocked.Increment(&currentId))
+    override x.ToString() = string value
+    member private x.AsString = x.ToString()
         
 type TexCoordSemantic =
     | BaseColor
@@ -85,25 +58,33 @@ type Material =
 
 type Mesh =
     {
+        BoundingBox     : Box3d
         Material        : option<MaterialId>
         Mode            : IndexedGeometryMode
         Index           : option<int[]>
         Positions       : V3f[]
         Normals         : option<V3f[]>
+        Tangents        : option<V4f[]>
         TexCoords       : list<V2f[] * HashSet<TexCoordSemantic>>
         Colors          : option<C4b[]>
+    }
+    
+type Geometry =
+    {
+        Name : option<string>
+        Meshes : list<MeshId>
     }
     
 type Node =
     {
         Trafo           : Trafo3d
-        Meshes          : list<MeshId> 
+        Geometry        : option<Geometry>
         Children        : list<Node>
     }
     
-
 type Scene =
     {
+        BoundingBox : Box3d
         Materials   : HashMap<MaterialId, Material>
         Meshes      : HashMap<MeshId, Mesh>
         Images      : HashMap<ImageId, PixImage>
