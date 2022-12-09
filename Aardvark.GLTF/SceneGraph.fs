@@ -95,10 +95,19 @@ module Shader =
     type ViewBiTangentAttribute() = inherit SemanticAttribute("ViewBiTangent")
     type ViewLightDirectionAttribute() = inherit SemanticAttribute("ViewLightDirection")
     
-    let skybox =
+    let skyboxSpecular =
         samplerCube {
-            texture uniform?Skybox
-            filter Filter.Anisotropic
+            texture uniform?SkyboxSpecular
+            filter Filter.MinMagMipLinear
+            addressU WrapMode.Wrap
+            addressV WrapMode.Wrap
+            addressW WrapMode.Wrap
+        }
+        
+    let skyboxDiffuse =
+        samplerCube {
+            texture uniform?SkyboxDiffuse
+            filter Filter.MinMagMipLinear
             addressU WrapMode.Wrap
             addressV WrapMode.Wrap
             addressW WrapMode.Wrap
@@ -160,6 +169,7 @@ module Shader =
         member x.HasNormals : bool = uniform?Mesh?HasNormals
         member x.HasTangents : bool = uniform?Mesh?HasTangents
         member x.HasColors : bool = uniform?Mesh?HasColors
+        member x.LevelCount : int = uniform?LevelCount
         
     type Vertex =
         {
@@ -196,35 +206,7 @@ module Shader =
                     viewLightDir = vld
                 }
         }
-    let random24 = 
-        [|
-            V2d(0.183014, 0.057349)
-            V2d(0.066681, 0.719551)
-            V2d(0.826578, 0.636280)
-            V2d(0.207799, 0.240253)
-            V2d(0.541970, 0.090749)
-            V2d(0.014185, 0.866101)
-            V2d(0.929036, 0.417594)
-            V2d(0.569475, 0.583288)
-            V2d(0.810305, 0.290636)
-            V2d(0.621660, 0.031124)
-            V2d(0.442131, 0.832180)
-            V2d(0.404755, 0.239412)
-            V2d(0.039530, 0.738925)
-            V2d(0.293360, 0.543963)
-            V2d(0.630658, 0.075838)
-            V2d(0.060362, 0.139359)
-            V2d(0.269777, 0.819915)
-            V2d(0.748755, 0.432552)
-            V2d(0.756616, 0.750890)
-            V2d(0.222299, 0.989969)
-            V2d(0.830065, 0.813399)
-            V2d(0.449001, 0.862132)
-            V2d(0.688157, 0.222665)
-            V2d(0.880603, 0.981080)
-        |]
-
-
+        
     let samples24 =
         [|
             V2d( -0.4612850228120782, -0.8824263018037591 )
@@ -277,38 +259,46 @@ module Shader =
         let k = a * 0.797884560803
         d / (d * (1.0 - k) + k)
         
+    let sampleEnvDiffuse (viewDir : V3d) =
+        let worldDir = uniform.ViewTrafoInv.TransformDir viewDir |> Vec.normalize
+        skyboxDiffuse.Sample(worldDir) |> srgbToLinear |> Vec.xyz
+        
     let sampleEnv (viewDir : V3d) (roughness : float) =
         let worldDir = uniform.ViewTrafoInv.TransformDir viewDir |> Vec.normalize
- 
-        //skybox.SampleLevel(worldDir, 12.0) |> srgbToLinear |> Vec.xyz
+        skyboxSpecular.SampleLevel(worldDir, roughness * float (uniform.LevelCount - 1)) |> srgbToLinear |> Vec.xyz
         
         
-        let range = Constant.PiHalf * roughness / 10.0
-        
-        let size = 2048
-        let anglePerPixel = Constant.PiHalf / float size
-        let pixelsPerSample = range / (5.0 * anglePerPixel)
-        let level = clamp 0.0 12.0 (log2 pixelsPerSample)
-        
-        let z = worldDir
-        let x =
-            if abs z.X > abs z.Y then Vec.cross z V3d.OIO |> Vec.normalize
-            else Vec.cross z V3d.IOO |> Vec.normalize
-        let y = Vec.cross z x
-        
-        
-        let mutable sum = V4d.Zero
-        let dt = range / 24.0
-        for o in random24 do
-            let phi = o.X * Constant.PiTimesTwo
-            let theta = o.Y * range
-            let dir = V3d(cos phi * sin theta, sin phi * sin theta, cos theta)
-            let realDir = x * dir.X + y * dir.Y + z * dir.Z
-            
-            let c = skybox.SampleLevel(realDir, level) |> srgbToLinear |> Vec.xyz
-            let w = exp (-Vec.dot o o * 1.96)
-            sum <- sum + V4d(c * w, w)
-        sum.XYZ / sum.W
+        //
+        // //skybox.SampleLevel(worldDir, 12.0) |> srgbToLinear |> Vec.xyz
+        //
+        //
+        // let range = Constant.PiHalf * roughness / 10.0
+        //
+        // let size = 2048
+        // let anglePerPixel = Constant.PiHalf / float size
+        // let pixelsPerSample = range / anglePerPixel
+        // let level = clamp 0.0 12.0 (log2 pixelsPerSample)
+        //
+        // let z = worldDir
+        // let x =
+        //     if abs z.X > abs z.Y then Vec.cross z V3d.OIO |> Vec.normalize
+        //     else Vec.cross z V3d.IOO |> Vec.normalize
+        // let y = Vec.cross z x
+        //
+        //
+        // let mutable sum = V4d.Zero
+        // for o in random40 do
+        //     let phi = o.X * Constant.PiTimesTwo
+        //     // float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a*a - 1.0) * Xi.y))
+        //     let cosTheta = sqrt((1.0 - o.Y) / (1.0 + (roughness * roughness - 1.0) * o.Y))
+        //     let sinTheta = sqrt (1.0 - cosTheta * cosTheta)
+        //     let dir = V3d(cos phi * sinTheta, sin phi * sinTheta, cosTheta)
+        //     let realDir = x * dir.X + y * dir.Y + z * dir.Z
+        //     
+        //     let c = skybox.SampleLevel(realDir, level) |> srgbToLinear |> Vec.xyz
+        //     
+        //     sum <- sum + V4d(c, 1.0)
+        // sum.XYZ / sum.W
         
     let shade (v : Vertex) =
         fragment {
@@ -326,9 +316,9 @@ module Shader =
                 if uniform.HasRoughnessTexture then
                     let tv = roughnessTexture.Sample(v.roughCoord).X
                     let uv = eps + uniform.Roughness
-                    tv * uv |> saturate
+                    tv * uv |> clamp 0.0 0.99
                 else
-                    uniform.Roughness + eps |> saturate
+                    uniform.Roughness + eps |> clamp 0.0 0.99
             
             let metalness =
                 if uniform.HasMetallicnessTexture then
@@ -383,7 +373,7 @@ module Shader =
             let lambert = nl
             let dr = V3d.III * occlusion
             
-            let diffuseIrradiance = sampleEnv vn 1.0 * occlusion
+            let diffuseIrradiance = sampleEnvDiffuse vn * occlusion
             let specularIrradiance = sampleEnv refl roughness * occlusion
             
             let diffuseDirectTerm = (albedo.XYZ / Constant.Pi) * (V3d.III - f) * (1.0 - metalness)
@@ -391,10 +381,10 @@ module Shader =
             let specularDirectTerm =
                 (f * g * d) / (4.0 * nl * nv + eps)
             
-            let brdfDirectOutput = (diffuseDirectTerm + specularDirectTerm) * lambert * dr
-            let ambientDiffuse = diffuseIrradiance * (albedo.XYZ / Constant.Pi) * (1.0 - f) * (1.0 - metalness)
+            let brdfDirectOutput = (diffuseDirectTerm + specularDirectTerm) * lambert * dr |> saturate
+            let ambientDiffuse = diffuseIrradiance * (albedo.XYZ / Constant.Pi) * (1.0 - f) * (1.0 - metalness) |> saturate
             
-            let ambientSpecular = specularIrradiance * f
+            let ambientSpecular = specularIrradiance * f |> saturate
             
             let color = brdfDirectOutput + ambientDiffuse + ambientSpecular
             
@@ -410,7 +400,7 @@ module Shader =
             
             let dir = p14.XYZ / p14.W - p04.XYZ / p04.W
             
-            let res = V4d(sampleEnv dir 0.0, 1.0)
+            let res = V4d(sampleEnv dir 0.2, 1.0)
             return linearToSrgb res
             //return skybox.Sample(dir)
         }
@@ -435,35 +425,125 @@ module private DownsampleCube =
         let skybox =
             samplerCube {
                 texture uniform?Skybox
-                filter Filter.MinMagMipPoint
+                filter Filter.MinMagLinearMipPoint
                 addressU WrapMode.Wrap
                 addressV WrapMode.Wrap
                 addressW WrapMode.Wrap
             }
         
+        let rand =
+            sampler2d {
+                texture uniform?Random
+                filter Filter.MinMagMipPoint
+                addressU WrapMode.Wrap
+                addressV WrapMode.Wrap
+            }
+        
         type UniformScope with
             member x.SourceLevel : int = uniform?SourceLevel
+            member x.LevelCount : int = uniform?LevelCount
+            member x.IsDiffuse : bool = uniform?IsDiffuse
             
+        [<GLSLIntrinsic("uint({0})")>]
+        let suint32 (v : uint32) : uint32 = onlyInShaderCode "asda"
+        
+        let radicalInverse (bits : uint32) =
+            let bits = (bits <<< 16) ||| (bits >>> 16)
+            let bits = ((bits &&& suint32 0x55555555u) <<< 1) ||| ((bits &&& suint32 0xAAAAAAAAu) >>> 1)
+            let bits = ((bits &&& suint32 0x33333333u) <<< 2) ||| ((bits &&& suint32 0xCCCCCCCCu) >>> 2)
+            let bits = ((bits &&& suint32 0x0F0F0F0Fu) <<< 4) ||| ((bits &&& suint32 0xF0F0F0F0u) >>> 4)
+            let bits = ((bits &&& suint32 0x00FF00FFu) <<< 8) ||| ((bits &&& suint32 0xFF00FF00u) >>> 8)
+            float bits * 2.3283064365386963e-10
+            // float RadicalInverse_VdC(uint bits) 
+            // {
+            //     bits = (bits << 16u) | (bits >> 16u);
+            //     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+            //     bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+            //     bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+            //     bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+            //     return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+            // }
+        
+        let hammersley (i : int) (n : int) =
+            V2d(float i / float n, radicalInverse (uint32 i))
+        
+        let linearToSrgb (v : V4d) =
+            let e = 1.0 / 2.2
+            V4d(v.X ** e, v.Y ** e, v.Z ** e, v.W)
+            
+        let srgbToLinear (v : V4d) =
+            let e = 2.2
+            V4d(v.X ** e, v.Y ** e, v.Z ** e, v.W)
+            
+        let sampleEnv (worldDir : V3d) (roughness : float) =
+            //let worldDir = uniform.ViewTrafoInv.TransformDir viewDir |> Vec.normalize
+            
+            let z = worldDir
+            let x =
+                if abs z.Z > 0.999 then Vec.cross z V3d.OIO |> Vec.normalize
+                else Vec.cross z V3d.OOI |> Vec.normalize
+            let y = Vec.cross z x
+            
+            let mutable sum = V4d.Zero
+            let v = worldDir
+            let n = worldDir
+            let randSize = rand.Size
+            let a = roughness * roughness
+            let aSq = a*a
+            for i in 0 .. 4096 do
+                //let o = V2d.Zero //hammersley i 1024
+                let h =
+                    let o = rand.[V2i(i % randSize.X, i / randSize.X)].XY
+                    let phi = o.X * Constant.PiTimesTwo
+                    let mutable cosTheta = 0.0
+                    let mutable sinTheta = 0.0
+                    if uniform.IsDiffuse then
+                        let t = o.Y * Constant.Pi - Constant.PiHalf
+                        cosTheta <- cos t
+                        sinTheta <- sin t
+                    else
+                        cosTheta <- sqrt((1.0 - o.Y) / (1.0 + (aSq - 1.0) * o.Y)) |> clamp -1.0 1.0
+                        sinTheta <- sqrt (1.0 - cosTheta * cosTheta)
+                    let fx = cos phi * sinTheta
+                    let fy = sin phi * sinTheta
+                    let fz = cosTheta
+                    Vec.normalize (x * fx + y * fy + z * fz)
+                
+                let l = Vec.normalize (2.0 * Vec.dot v h * h - v)
+                let nl = Vec.dot n l |> max 0.0
+                
+                if nl > 0.0 then
+                    let c = skybox.SampleLevel(h, 0.0) |> srgbToLinear |> Vec.xyz
+                    sum <- sum + V4d(c * nl, nl)
+                
+                
+            sum.XYZ / sum.W
+            
+                   
         let sampleFace (v : Effects.Vertex) =
             fragment {
-                let dx = V2d(1.0 / (float uniform.ViewportSize.X), 0.0)
-                let dy = V2d(0.0, 1.0 / (float uniform.ViewportSize.Y))
+                // let dx = V2d(1.0 / (float uniform.ViewportSize.X), 0.0)
+                // let dy = V2d(0.0, 1.0 / (float uniform.ViewportSize.Y))
                 
                 let p00 = v.pos.XY / v.pos.W
-                let p01 = p00 + dy
-                let p10 = p00 + dx
-                let p11 = p00 + dx + dy
+                // let p01 = p00 + dy
+                // let p10 = p00 + dx
+                // let p11 = p00 + dx + dy
                 
                 let s00 = uniform.ViewTrafoInv.TransformDir (V3d(p00, -1.0)) |> Vec.normalize
-                let s01 = uniform.ViewTrafoInv.TransformDir (V3d(p01, -1.0)) |> Vec.normalize
-                let s10 = uniform.ViewTrafoInv.TransformDir (V3d(p10, -1.0)) |> Vec.normalize
-                let s11 = uniform.ViewTrafoInv.TransformDir (V3d(p11, -1.0)) |> Vec.normalize
+                // let s01 = uniform.ViewTrafoInv.TransformDir (V3d(p01, -1.0)) |> Vec.normalize
+                // let s10 = uniform.ViewTrafoInv.TransformDir (V3d(p10, -1.0)) |> Vec.normalize
+                // let s11 = uniform.ViewTrafoInv.TransformDir (V3d(p11, -1.0)) |> Vec.normalize
+                //
+                // let c00 = skybox.SampleLevel(s00, float uniform.SourceLevel)
+                // let c01 = skybox.SampleLevel(s01, float uniform.SourceLevel)
+                // let c10 = skybox.SampleLevel(s10, float uniform.SourceLevel)
+                // let c11 = skybox.SampleLevel(s11, float uniform.SourceLevel)
+                // return (c00 + c01 + c10 + c11) * 0.25
                 
-                let c00 = skybox.SampleLevel(s00, float uniform.SourceLevel)
-                let c01 = skybox.SampleLevel(s01, float uniform.SourceLevel)
-                let c10 = skybox.SampleLevel(s10, float uniform.SourceLevel)
-                let c11 = skybox.SampleLevel(s11, float uniform.SourceLevel)
-                return (c00 + c01 + c10 + c11) * 0.25
+                let roughness = float (uniform.SourceLevel + 1) / float (uniform.LevelCount - 1)
+                let res = sampleEnv s00 roughness
+                return linearToSrgb (V4d(res, 1.0))
             }
     
     let private faces =
@@ -476,9 +556,11 @@ module private DownsampleCube =
             5, CameraView.lookAt V3d.Zero V3d.OON V3d.ONO
         |]
     
+    let levelCount = 8
 
     let downsampleCubeMap (runtime : IRuntime) (src : ITexture) =
         let src = runtime.PrepareTexture src
+        let diffuse = runtime.CreateTextureCube(src.Size.X, src.Format, src.MipMapLevels)
         
         let signature =
             runtime.CreateFramebufferSignature [
@@ -488,6 +570,18 @@ module private DownsampleCube =
         let view = cval (CameraView.lookAt V3d.Zero V3d.IOO V3d.OOI)
         let viewportSize = cval V2i.II
         let sourceLevel = cval 0
+        let isDiffuse = cval false
+        
+        
+        let random =
+            let img = PixImage<float32>(Col.Format.RGBA, V2i(128, 128))
+            let rand = RandomSystem()
+            img.GetMatrix<C4f>().SetByIndex (fun _ ->
+                rand.UniformV4f().ToC4f()
+            ) |> ignore
+            PixTexture2d(PixImageMipMap [| img :> PixImage |], TextureParams.empty) :> ITexture
+        
+        
         let task =
             Sg.fullScreenQuad
             |> Sg.shader {
@@ -495,6 +589,9 @@ module private DownsampleCube =
             }
             |> Sg.viewTrafo (view |> AVal.map CameraView.viewTrafo)
             |> Sg.texture' "Skybox" src
+            |> Sg.uniform "IsDiffuse" isDiffuse
+            |> Sg.uniform' "LevelCount" levelCount
+            |> Sg.texture' "Random" random
             |> Sg.uniform "ViewportSize" viewportSize
             |> Sg.uniform "SourceLevel" sourceLevel
             |> Sg.depthTest' DepthTest.None
@@ -508,7 +605,7 @@ module private DownsampleCube =
                 viewportSize.Value <- dstSize
                 sourceLevel.Value <- srcLevel
             )
-            
+             
             for (index, cam) in faces do
                 use fbo = runtime.CreateFramebuffer(signature, [DefaultSemantic.Colors, src.[TextureAspect.Color, dstLevel, index] :> IFramebufferOutput])
                 transact (fun () -> view.Value <- cam)
@@ -518,12 +615,23 @@ module private DownsampleCube =
             dstSize <- max V2i.II (dstSize / 2)
             dstLevel <- dstLevel + 1
         
-        for level in 0 .. src.MipMapLevels - 1 do
-            for face in 0 .. 5 do
-            
+        // diffuse
+        transact (fun () ->
+            viewportSize.Value <- src.Size.XY
+            sourceLevel.Value <- 0
+            isDiffuse.Value <- true
+        )
+         
+        for (index, cam) in faces do
+            use fbo = runtime.CreateFramebuffer(signature, [DefaultSemantic.Colors, diffuse.[TextureAspect.Color, 0, index] :> IFramebufferOutput])
+            transact (fun () -> view.Value <- cam)
+            task.Run(fbo)
+        runtime.GenerateMipMaps(diffuse)
         
-            runtime.Download(src, level, face).Save (sprintf "/Users/schorsch/Desktop/textures/f%d_%d.jpg" face level)
-        src
+        // for level in 0 .. src.MipMapLevels - 1 do
+        //     for face in 0 .. 5 do
+        //     runtime.Download(src, level, face).Save (sprintf "/Users/schorsch/Desktop/textures/f%d_%d.jpg" face level)
+        src, diffuse
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Scene =
@@ -685,7 +793,10 @@ module Scene =
             Sg.ofList [cs; ms]
             |> Sg.trafo' node.Trafo
             
-        let env = Skybox.get "chapel_$.png" |> AVal.force |> DownsampleCube.downsampleCubeMap runtime :> ITexture |> AVal.constant
+        let specular, diffuse = Skybox.get "chapel_$.png" |> AVal.force |> DownsampleCube.downsampleCubeMap runtime
+        
+        let specular = specular :> ITexture |> AVal.constant
+        let diffuse = diffuse :> ITexture |> AVal.constant
             
         Sg.ofList [
             traverse scene.RootNode
@@ -696,16 +807,19 @@ module Scene =
             |> Sg.vertexBufferValue' Semantic.EmissiveCoordinate V2f.Zero
             |> Sg.vertexBufferValue' Semantic.MetallicnessCoordinate V2f.Zero
             |> Sg.vertexBufferValue' Semantic.NormalCoordinate V2f.Zero
-            |> Sg.texture "Skybox" env
+            |> Sg.texture "SkyboxSpecular" specular
+            |> Sg.texture "SkyboxDiffuse" diffuse
             
             Sg.farPlaneQuad
-            |> Sg.texture "Skybox" env
+            |> Sg.texture "SkyboxSpecular" specular
+            |> Sg.texture "SkyboxDiffuse" diffuse
             |> Sg.shader {
                 do! Shader.environment
             }
             
                
         ]
+        |> Sg.uniform' "LevelCount" DownsampleCube.levelCount
             
             
 
