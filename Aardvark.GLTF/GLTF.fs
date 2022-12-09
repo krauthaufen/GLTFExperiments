@@ -354,7 +354,6 @@ module GLTF =
                                 let mesh =
                                     {
                                         BoundingBox     = bounds
-                                        Material        = material
                                         Mode            = mode
                                         Index           = if isNull index then None else Some index
                                         Positions       = position
@@ -363,7 +362,7 @@ module GLTF =
                                         TexCoords       = Array.toList texCoords
                                         Colors          = colors
                                     }
-                                Some (MeshId.New(), mesh)
+                                Some (MeshId.New(), mesh, material)
                             | m ->
                                 Log.warn "mesh has incompatible positions: %A" m
                                 None
@@ -388,23 +387,55 @@ module GLTF =
                 let geometry =
                     if node.Mesh.HasValue then
                         let arr, name = meshes.[node.Mesh.Value]
-                        for (_, m) in arr do
+                        for (_, m, _) in arr do
                             bounds.ExtendBy m.BoundingBox
-                        let meshes = arr |> Array.map fst |> Array.toList
-                        Some {
-                            Name = if System.String.IsNullOrEmpty name then None else Some name
-                            Meshes = meshes
-                        }
+                        let matGroups = arr |> Array.groupBy (fun (_,_,mid) -> mid)
+                        //let meshes = arr |> Array.map fst |> Array.toList
+                        matGroups
+                        |> Array.toList
+                        |> List.map (fun (mid, arr) ->
+                            mid, arr |> Array.map (fun (gid, _, _) -> gid) |> Array.toList    
+                        )
                     else
-                        None
+                        []
                     
                 let bounds = bounds.Transformed trafo
                     
-                {
-                    Trafo = trafo
-                    Children = List.map fst cs
-                    Geometry = geometry
-                }, bounds
+                let node =
+                    match geometry with
+                    | [(mid, ms)] ->
+                        {
+                            Trafo = Some trafo
+                            Children = List.map fst cs
+                            Material = mid
+                            Geometry = ms
+                        }
+                    | [] ->
+                        {
+                            Trafo = Some trafo
+                            Children = List.map fst cs
+                            Material = None
+                            Geometry = []
+                        }
+                    | many ->
+                        let gcs = 
+                            many |> List.map (fun (mid, ms) ->
+                                {
+                                    Trafo = Some trafo
+                                    Children = List.map fst cs
+                                    Material = mid
+                                    Geometry = ms
+                                }
+                            )
+                        {
+                            Trafo = Some trafo
+                            Children = List.map fst cs @ gcs
+                            Material = None
+                            Geometry = []
+                        }
+                        
+                        
+                node, bounds
                 
             if model.Scene.HasValue then
                 let scene = model.Scenes.[model.Scene.Value]
@@ -416,16 +447,16 @@ module GLTF =
             
         let bounds, root = 
             match roots with
-            | [||] -> Box3d.Invalid, { Trafo = Trafo3d.Identity; Geometry = None; Children = [] }
+            | [||] -> Box3d.Invalid, { Trafo = None; Geometry = []; Children = []; Material = None }
             | [|(r, b)|] -> b, r
             | rs ->
                 let bounds = rs |> Array.map snd |> Box3d
-                bounds, { Trafo = Trafo3d.Identity; Geometry = None; Children = List.map fst (Array.toList rs) }
+                bounds, { Trafo = None; Geometry = []; Children = List.map fst (Array.toList rs); Material = None }
             
             
         {
             BoundingBox = bounds
-            Meshes      = meshes |> Array.map fst |> Array.concat |> HashMap.ofArray
+            Meshes      = meshes |> Array.collect (fun (arr,_) -> arr |> Array.map (fun (mid, m, _) -> mid, m)) |> HashMap.ofArray
             Materials   = materials |> Array.map (fun (a,b,_) -> a,b) |> HashMap.ofArray
             Images      = images |> Array.choose id |> HashMap.ofArray
             RootNode    = root

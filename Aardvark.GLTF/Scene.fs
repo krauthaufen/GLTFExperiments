@@ -59,7 +59,6 @@ type Material =
 type Mesh =
     {
         BoundingBox     : Box3d
-        Material        : option<MaterialId>
         Mode            : IndexedGeometryMode
         Index           : option<int[]>
         Positions       : V3f[]
@@ -68,17 +67,12 @@ type Mesh =
         TexCoords       : list<V2f[] * HashSet<TexCoordSemantic>>
         Colors          : option<C4b[]>
     }
-    
-type Geometry =
-    {
-        Name : option<string>
-        Meshes : list<MeshId>
-    }
-    
+ 
 type Node =
     {
-        Trafo           : Trafo3d
-        Geometry        : option<Geometry>
+        Trafo           : option<Trafo3d>
+        Material        : option<MaterialId>
+        Geometry        : list<MeshId>
         Children        : list<Node>
     }
     
@@ -92,4 +86,21 @@ type Scene =
     }
 
 
+module Scene =
+    let computeBounds (scene : Scene) =
+        
+        let rec traverse (n : Node) : Box3d =
+            let mutable box = n.Children |> List.map traverse |> Box3d
+            for mid in n.Geometry do
+                match HashMap.tryFind mid scene.Meshes with
+                | Some m -> box.ExtendBy m.BoundingBox
+                | None -> ()
+            
+            match n.Trafo with
+            | Some t -> box.Transformed t
+            | None -> box
 
+        traverse scene.RootNode
+        
+    let withBounds (scene : Scene) =
+        { scene with BoundingBox = computeBounds scene }
