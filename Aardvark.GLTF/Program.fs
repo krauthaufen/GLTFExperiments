@@ -47,29 +47,31 @@ let main _args =
     let model1 =
         GLTF.loadScene "/Users/schorsch/Downloads/untitled.glb"
         
-    let mutable materials = HashMap.empty
-    let mutable geometries = HashMap.empty
-    let mutable nodes = []
-        
-    let geometry =
-        let prim = IndexedGeometryPrimitives.solidPhiThetaSphere (Sphere3d(V3d.Zero, 0.3)) 36 C4b.White
-        let pos = prim.IndexedAttributes.[DefaultSemantic.Positions] :?> V3f[]
-        
-        {
-            BoundingBox     = Box3d.FromCenterAndSize(V3d.Zero, V3d.III * 0.6)
-            Mode            = IndexedGeometryMode.TriangleList
-            Index           = Some (prim.IndexArray :?> int[])
-            Positions       = pos
-            Normals         = Some (pos |> Array.map Vec.normalize)
-            Tangents        = None
-            TexCoords       = []
-            Colors          = None
-        }
-        
-    let gid = MeshId.New()
-    geometries <- HashMap.add gid geometry geometries
-    
     let testScene =
+        let mutable materials = HashMap.empty
+        let mutable geometries = HashMap.empty
+        let mutable nodes = []
+            
+        let geometry =
+            let prim = IndexedGeometryPrimitives.solidPhiThetaSphere (Sphere3d(V3d.Zero, 0.3)) 36 C4b.White
+            let pos = prim.IndexedAttributes.[DefaultSemantic.Positions] :?> V3f[]
+            
+            {
+                Name            = Some "Sphere"
+                BoundingBox     = Box3d.FromCenterAndSize(V3d.Zero, V3d.III * 0.6)
+                Mode            = IndexedGeometryMode.TriangleList
+                Index           = Some (prim.IndexArray :?> int[])
+                Positions       = pos
+                Normals         = Some (pos |> Array.map Vec.normalize)
+                Tangents        = None
+                TexCoords       = []
+                Colors          = None
+            }
+            
+        let gid = MeshId.New()
+        geometries <- HashMap.add gid geometry geometries
+        
+        
         let steps = 8
         for ri in 0 .. steps - 1 do
             let mutable roughness = float ri / float (steps - 1)
@@ -87,7 +89,7 @@ let main _args =
                         Opaque              = true
                             
                         AlbedoTexutre       = None
-                        AlbedoColor         = C4f.White
+                        AlbedoColor         = C4f.Beige
                             
                         Roughness           = roughness
                         RoughnessTexture    = None
@@ -103,14 +105,13 @@ let main _args =
                     }
                 
                 materials <- HashMap.add mid material materials
-                nodes <- { Trafo = Some offset; Geometry = [gid]; Children = []; Material = Some mid } :: nodes
+                nodes <- { Name = None; Trafo = Some offset; Meshes = [gid]; Children = []; Material = Some mid } :: nodes
         
-        Scene.withBounds {
+        {
             Materials = materials
             Meshes = geometries
-            BoundingBox = Box3d.Invalid
-            Images = HashMap.empty
-            RootNode = { Trafo = None; Geometry = []; Children = nodes; Material = None}
+            ImageData = HashMap.empty
+            RootNode = { Name = None; Trafo = None; Meshes = []; Children = nodes; Material = None}
         }
         
     let model1 = testScene

@@ -58,6 +58,7 @@ type Material =
 
 type Mesh =
     {
+        Name            : option<string>
         BoundingBox     : Box3d
         Mode            : IndexedGeometryMode
         Index           : option<int[]>
@@ -70,29 +71,25 @@ type Mesh =
  
 type Node =
     {
+        Name            : option<string>
         Trafo           : option<Trafo3d>
         Material        : option<MaterialId>
-        Geometry        : list<MeshId>
+        Meshes          : list<MeshId>
         Children        : list<Node>
     }
-    
+
 type Scene =
     {
-        BoundingBox : Box3d
         Materials   : HashMap<MaterialId, Material>
         Meshes      : HashMap<MeshId, Mesh>
-        Images      : HashMap<ImageId, PixImage>
+        ImageData   : HashMap<ImageId, byte[]>
         RootNode    : Node
     }
-
-
-module Scene =
-    let computeBounds (scene : Scene) =
-        
+    member x.BoundingBox =
         let rec traverse (n : Node) : Box3d =
             let mutable box = n.Children |> List.map traverse |> Box3d
-            for mid in n.Geometry do
-                match HashMap.tryFind mid scene.Meshes with
+            for mid in n.Meshes do
+                match HashMap.tryFind mid x.Meshes with
                 | Some m -> box.ExtendBy m.BoundingBox
                 | None -> ()
             
@@ -100,7 +97,48 @@ module Scene =
             | Some t -> box.Transformed t
             | None -> box
 
-        traverse scene.RootNode
+        traverse x.RootNode
+
+    
+module Node =
+    
+    let empty =
+        {
+            Name = None
+            Trafo = None
+            Material = None
+            Meshes = []
+            Children = []
+        }
+
+    let ofList (children : list<Node>) =
+        {
+            Name = None
+            Trafo = None
+            Material = None
+            Meshes = []
+            Children = children
+        }
         
-    let withBounds (scene : Scene) =
-        { scene with BoundingBox = computeBounds scene }
+    let ofSeq (children : seq<Node>) =
+        children |> Seq.toList |> ofList
+    
+    let ofArray (children : Node[]) =
+        children |> Array.toList |> ofList
+    
+    let ofMeshes (meshes : list<MeshId>) =
+        {
+            Name = None
+            Trafo = None
+            Material = None
+            Meshes = meshes
+            Children = []
+        }
+    
+    let trafo (t : Trafo3d) (n : Node) =
+        match n.Trafo with
+        | Some o ->
+            { n with Trafo = Some (t * o) }
+        | None ->
+            { n with Trafo = Some t }
+    

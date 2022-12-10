@@ -697,7 +697,14 @@ module SceneSg =
         
     let toSimpleSg (runtime : IRuntime) (scene : Scene) =
         let textures =
-            scene.Images |> HashMap.map (fun _ i -> PixTexture2d(PixImageMipMap [|i|], TextureParams.mipmapped) :> ITexture |> AVal.constant)
+            scene.ImageData |> HashMap.map (fun _ data ->
+                try
+                    use ms = new System.IO.MemoryStream(data)
+                    let img = PixImage.Load ms
+                    PixTexture2d(PixImageMipMap [|img|], TextureParams.mipmapped) :> ITexture |> AVal.constant
+                with _ ->
+                    white
+            )
  
         let meshes =
             scene.Meshes |> HashMap.map (fun _ m -> meshSg scene textures m)
@@ -790,7 +797,7 @@ module SceneSg =
                 | _ -> node.Children |> Seq.map (traverse hasMaterial) |> Sg.ofSeq |> Some
                 
             let ms =
-                node.Geometry |> List.choose (fun id -> HashMap.tryFind id meshes) |> Sg.ofList |> Some
+                node.Meshes |> List.choose (fun id -> HashMap.tryFind id meshes) |> Sg.ofList |> Some
                 
             let sg =
                 match cs with
@@ -812,7 +819,7 @@ module SceneSg =
             | Some t -> Sg.trafo' t sg
             | None -> sg
             
-        let specular, diffuse = Skybox.get "chapel_$.png" |> AVal.force |> DownsampleCube.downsampleCubeMap runtime
+        let specular, diffuse = Skybox.get "miramar_$.png" |> AVal.force |> DownsampleCube.downsampleCubeMap runtime
         
         let specular = specular :> ITexture |> AVal.constant
         let diffuse = diffuse :> ITexture |> AVal.constant

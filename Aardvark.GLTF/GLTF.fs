@@ -145,15 +145,17 @@ module GLTF =
                         let view = model.BufferViews.[img.BufferView.Value]
                         let buffer = readBuffer view.Buffer
                         
-                        try
-                            let pimg = 
-                                use ms = new MemoryStream(buffer, view.ByteOffset, view.ByteLength)
-                                PixImage.Load(ms)
-                                
-                            Some (id, pimg)
-                        with e ->
-                            Log.warn "could not load image %A (%A)" img.Name img.Uri
-                            None
+                        let data = Array.sub buffer view.ByteOffset view.ByteLength
+                        Some (id, data)
+                        // try
+                        //     let pimg = 
+                        //         use ms = new MemoryStream(buffer, view.ByteOffset, view.ByteLength)
+                        //         PixImage.Load(ms)
+                        //         
+                        //     Some (id, pimg)
+                        // with e ->
+                        //     Log.warn "could not load image %A (%A)" img.Name img.Uri
+                        //     None
                     else
                         None
                 )
@@ -255,126 +257,126 @@ module GLTF =
                 [||]
             else
                 model.Meshes |> Array.map (fun m ->
-                    let meshes = 
-                        m.Primitives |> Array.choose (fun p ->
-                            let index, indexRange =
-                                if p.Indices.HasValue then
-                                    let acc = model.Accessors.[p.Indices.Value]
-                                    let minIndex = if isNull acc.Min then 0 else int acc.Min.[0]
-                                    let maxIndex = if isNull acc.Max then System.Int32.MaxValue else int acc.Max.[0]
-                                    getAttributeArray readBuffer model p.Indices.Value, Some (Range1i(minIndex, maxIndex))
-                                else
-                                    null, None
-                                    
-                            let attributes =
-                                p.Attributes |> Seq.toArray |> Array.map (fun (KeyValue(name, att)) ->
-                                    let arr = getAttributeArray readBuffer model att
-                                    let arr =
-                                        if name.StartsWith "TEXCOORD" then flipY arr
-                                        else arr
-                                    
-                                    name, arr
-                                )
+                
+                    m.Primitives |> Array.choose (fun p ->
+                        let index, indexRange =
+                            if p.Indices.HasValue then
+                                let acc = model.Accessors.[p.Indices.Value]
+                                let minIndex = if isNull acc.Min then 0 else int acc.Min.[0]
+                                let maxIndex = if isNull acc.Max then System.Int32.MaxValue else int acc.Max.[0]
+                                getAttributeArray readBuffer model p.Indices.Value, Some (Range1i(minIndex, maxIndex))
+                            else
+                                null, None
                                 
-                            let attributeMap =
-                                HashMap.ofArray attributes
-                              
-                              
-                              
-                            match HashMap.tryFind "POSITION" attributeMap with
-                            | Some (:? array<V3f> as position) ->  
-                                let bounds =
-                                    let acc = model.Accessors.[p.Attributes.["POSITION"]]
-                                    let l = V3f acc.Min
-                                    let h = V3f acc.Max
-                                    Box3d(V3d l, V3d h)
-                                    
-                                let mode =
-                                    match p.Mode with
-                                    | MeshPrimitive.ModeEnum.POINTS -> IndexedGeometryMode.PointList
-                                    | MeshPrimitive.ModeEnum.LINES -> IndexedGeometryMode.LineList
-                                    | MeshPrimitive.ModeEnum.LINE_STRIP -> IndexedGeometryMode.LineStrip
-                                    | MeshPrimitive.ModeEnum.TRIANGLES -> IndexedGeometryMode.TriangleList
-                                    | MeshPrimitive.ModeEnum.TRIANGLE_STRIP -> IndexedGeometryMode.TriangleStrip
-                                    | m -> failwithf "bad mode: %A" m // TODO: convert to TriangleList indices??
-                                    
-                                let material =
-                                    if p.Material.HasValue then
-                                        let mid, _mat, _mapping = materials.[p.Material.Value]
-                                        Some mid
+                        let attributes =
+                            p.Attributes |> Seq.toArray |> Array.map (fun (KeyValue(name, att)) ->
+                                let arr = getAttributeArray readBuffer model att
+                                let arr =
+                                    if name.StartsWith "TEXCOORD" then flipY arr
+                                    else arr
+                                
+                                name, arr
+                            )
+                            
+                        let attributeMap =
+                            HashMap.ofArray attributes
+                          
+                          
+                          
+                        match HashMap.tryFind "POSITION" attributeMap with
+                        | Some (:? array<V3f> as position) ->  
+                            let bounds =
+                                let acc = model.Accessors.[p.Attributes.["POSITION"]]
+                                let l = V3f acc.Min
+                                let h = V3f acc.Max
+                                Box3d(V3d l, V3d h)
+                                
+                            let mode =
+                                match p.Mode with
+                                | MeshPrimitive.ModeEnum.POINTS -> IndexedGeometryMode.PointList
+                                | MeshPrimitive.ModeEnum.LINES -> IndexedGeometryMode.LineList
+                                | MeshPrimitive.ModeEnum.LINE_STRIP -> IndexedGeometryMode.LineStrip
+                                | MeshPrimitive.ModeEnum.TRIANGLES -> IndexedGeometryMode.TriangleList
+                                | MeshPrimitive.ModeEnum.TRIANGLE_STRIP -> IndexedGeometryMode.TriangleStrip
+                                | m -> failwithf "bad mode: %A" m // TODO: convert to TriangleList indices??
+                                
+                            let material =
+                                if p.Material.HasValue then
+                                    let mid, _mat, _mapping = materials.[p.Material.Value]
+                                    Some mid
+                                else
+                                    None
+                            let tcMapping =
+                                if p.Material.HasValue then
+                                    let _mid, _mat, mapping = materials.[p.Material.Value]
+                                    mapping
+                                else
+                                    HashMap.empty
+                                
+                            let texCoords =
+                                attributes |> Array.choose (fun (name, arr) ->
+                                    if name.StartsWith "TEXCOORD_" then
+                                        match System.Int32.TryParse (name.Substring 9) with
+                                        | (true, id) ->
+                                            match arr with
+                                            | :? array<V2f> as arr ->
+                                                match HashMap.tryFind id tcMapping with
+                                                | Some sems -> Some (arr, sems)
+                                                | None -> None
+                                            | arr ->
+                                                None
+                                        | _ -> None
                                     else
                                         None
-                                let tcMapping =
-                                    if p.Material.HasValue then
-                                        let _mid, _mat, mapping = materials.[p.Material.Value]
-                                        mapping
-                                    else
-                                        HashMap.empty
-                                    
-                                let texCoords =
-                                    attributes |> Array.choose (fun (name, arr) ->
-                                        if name.StartsWith "TEXCOORD_" then
-                                            match System.Int32.TryParse (name.Substring 9) with
-                                            | (true, id) ->
-                                                match arr with
-                                                | :? array<V2f> as arr ->
-                                                    match HashMap.tryFind id tcMapping with
-                                                    | Some sems -> Some (arr, sems)
-                                                    | None -> None
-                                                | arr ->
-                                                    None
-                                            | _ -> None
-                                        else
-                                            None
-                                    )
-                                    
-                                let index =
-                                    match index with
-                                    | null -> null
-                                    | :? array<uint8> as arr -> Array.map int arr
-                                    | :? array<uint16> as arr -> Array.map int arr
-                                    | :? array<uint32> as arr -> Array.map int arr
-                                    | _ -> failwithf "unexpected index-type: %A" index
-                                    
-                                let normals =
-                                    match HashMap.tryFind "NORMAL" attributeMap with
-                                    | Some (:? array<V3f> as normals) -> Some normals
-                                    | _ -> None
-                                    
-                                let tangents =
-                                    match HashMap.tryFind "TANGENT" attributeMap with
-                                    | Some (:? array<V4f> as tangents) -> Some tangents
-                                    | _ -> None
-                                    
-                                let colors =
-                                    match HashMap.tryFind "COLOR_0" attributeMap with
-                                    | Some (:? array<C4b> as cs) -> Some cs
-                                    | _ -> None
-                                    
-                                let mesh =
-                                    {
-                                        BoundingBox     = bounds
-                                        Mode            = mode
-                                        Index           = if isNull index then None else Some index
-                                        Positions       = position
-                                        Normals         = normals
-                                        Tangents        = tangents  
-                                        TexCoords       = Array.toList texCoords
-                                        Colors          = colors
-                                    }
-                                Some (MeshId.New(), mesh, material)
-                            | m ->
-                                Log.warn "mesh has incompatible positions: %A" m
-                                None
-                             
-                        )
+                                )
+                                
+                            let index =
+                                match index with
+                                | null -> null
+                                | :? array<uint8> as arr -> Array.map int arr
+                                | :? array<uint16> as arr -> Array.map int arr
+                                | :? array<uint32> as arr -> Array.map int arr
+                                | _ -> failwithf "unexpected index-type: %A" index
+                                
+                            let normals =
+                                match HashMap.tryFind "NORMAL" attributeMap with
+                                | Some (:? array<V3f> as normals) -> Some normals
+                                | _ -> None
+                                
+                            let tangents =
+                                match HashMap.tryFind "TANGENT" attributeMap with
+                                | Some (:? array<V4f> as tangents) -> Some tangents
+                                | _ -> None
+                                
+                            let colors =
+                                match HashMap.tryFind "COLOR_0" attributeMap with
+                                | Some (:? array<C4b> as cs) -> Some cs
+                                | _ -> None
+                                
+                            let mesh =
+                                {
+                                    Name            = if System.String.IsNullOrEmpty m.Name then None else Some m.Name
+                                    BoundingBox     = bounds
+                                    Mode            = mode
+                                    Index           = if isNull index then None else Some index
+                                    Positions       = position
+                                    Normals         = normals
+                                    Tangents        = tangents  
+                                    TexCoords       = Array.toList texCoords
+                                    Colors          = colors
+                                }
+                            Some (MeshId.New(), mesh, material)
+                        | m ->
+                            Log.warn "mesh has incompatible positions: %A" m
+                            None
+                         
+                    )
                         
-                    meshes, m.Name
                 )
             
         let roots =
             
-            let rec traverse (nid : int) : Node * Box3d =
+            let rec traverse (nid : int) : Node =
                 let node = model.Nodes.[nid]
                 let trafo = getTrafo node
                 
@@ -382,13 +384,10 @@ module GLTF =
                     if isNull node.Children then []
                     else node.Children |> Array.toList |> List.map traverse
                     
-                let mutable bounds = cs |> Seq.map snd |> Box3d
                     
                 let geometry =
                     if node.Mesh.HasValue then
-                        let arr, name = meshes.[node.Mesh.Value]
-                        for (_, m, _) in arr do
-                            bounds.ExtendBy m.BoundingBox
+                        let arr = meshes.[node.Mesh.Value]
                         let matGroups = arr |> Array.groupBy (fun (_,_,mid) -> mid)
                         //let meshes = arr |> Array.map fst |> Array.toList
                         matGroups
@@ -399,43 +398,42 @@ module GLTF =
                     else
                         []
                     
-                let bounds = bounds.Transformed trafo
-                    
-                let node =
-                    match geometry with
-                    | [(mid, ms)] ->
-                        {
-                            Trafo = Some trafo
-                            Children = List.map fst cs
-                            Material = mid
-                            Geometry = ms
-                        }
-                    | [] ->
-                        {
-                            Trafo = Some trafo
-                            Children = List.map fst cs
-                            Material = None
-                            Geometry = []
-                        }
-                    | many ->
-                        let gcs = 
-                            many |> List.map (fun (mid, ms) ->
-                                {
-                                    Trafo = Some trafo
-                                    Children = List.map fst cs
-                                    Material = mid
-                                    Geometry = ms
-                                }
-                            )
-                        {
-                            Trafo = Some trafo
-                            Children = List.map fst cs @ gcs
-                            Material = None
-                            Geometry = []
-                        }
-                        
-                        
-                node, bounds
+                let name = if System.String.IsNullOrEmpty node.Name then None else Some node.Name
+                match geometry with
+                | [(mid, ms)] ->
+                    {
+                        Name = name
+                        Trafo = Some trafo
+                        Children = cs
+                        Material = mid
+                        Meshes = ms
+                    }
+                | [] ->
+                    {
+                        Name = name
+                        Trafo = Some trafo
+                        Children = cs
+                        Material = None
+                        Meshes = []
+                    }
+                | many ->
+                    let gcs = 
+                        many |> List.map (fun (mid, ms) ->
+                            {
+                                Name = None
+                                Trafo = Some trafo
+                                Children = cs
+                                Material = mid
+                                Meshes = ms
+                            }
+                        )
+                    {
+                        Name = name
+                        Trafo = Some trafo
+                        Children = cs @ gcs
+                        Material = None
+                        Meshes = []
+                    }
                 
             if model.Scene.HasValue then
                 let scene = model.Scenes.[model.Scene.Value]
@@ -445,20 +443,18 @@ module GLTF =
             else
                 [||]
             
-        let bounds, root = 
+        let root = 
             match roots with
-            | [||] -> Box3d.Invalid, { Trafo = None; Geometry = []; Children = []; Material = None }
-            | [|(r, b)|] -> b, r
+            | [||] -> { Name = None; Trafo = None; Meshes = []; Children = []; Material = None }
+            | [|r|] -> r
             | rs ->
-                let bounds = rs |> Array.map snd |> Box3d
-                bounds, { Trafo = None; Geometry = []; Children = List.map fst (Array.toList rs); Material = None }
+                { Name = None; Trafo = None; Meshes = []; Children = Array.toList rs; Material = None }
             
             
         {
-            BoundingBox = bounds
-            Meshes      = meshes |> Array.collect (fun (arr,_) -> arr |> Array.map (fun (mid, m, _) -> mid, m)) |> HashMap.ofArray
+            Meshes      = meshes |> Array.collect (fun arr -> arr |> Array.map (fun (mid, m, _) -> mid, m)) |> HashMap.ofArray
             Materials   = materials |> Array.map (fun (a,b,_) -> a,b) |> HashMap.ofArray
-            Images      = images |> Array.choose id |> HashMap.ofArray
+            ImageData   = images |> Array.choose id |> HashMap.ofArray
             RootNode    = root
         }
     
