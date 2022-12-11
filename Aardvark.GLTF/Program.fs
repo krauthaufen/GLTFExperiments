@@ -44,8 +44,40 @@ let main _args =
         )
         
               
-    let model1 =
-        GLTF.loadScene "/Users/schorsch/Downloads/untitled.glb"
+    let loadedModel =
+        GLTF.loadScene "/Users/schorsch/Downloads/x-wing_-_starwars_starship.glb"
+        
+    let print (scene : Scene) =
+        let rec print (n : Node) =
+            Log.start "%A" n.Name
+            match n.Trafo with
+            | Some t ->
+                let (u, s, vt) = SVD.Decompose (t.Forward.UpperLeftM33()) |> Option.get
+                let rot = Rot3d.FromM33d u
+                let trans = t.Forward.TransformPos V3d.Zero
+                Log.line "rot: %A" rot
+                Log.line "trans: %A" trans
+                Log.line "scale: %A" s.Diagonal
+                ()
+            | None ->
+                ()
+            if not (List.isEmpty n.Meshes) then
+                Log.start "meshes"
+                for m in n.Meshes do
+                    let mesh = scene.Meshes.[m.Mesh]
+                    let mat = m.Material |> Option.bind (fun mid -> HashMap.tryFind mid scene.Materials)
+                    Log.line "%A -> %A" mesh.Name (mat |> Option.bind (fun m -> m.Name))
+                Log.stop()
+                
+            if not (List.isEmpty n.Children) then
+                for m in n.Children do
+                    print m
+                    
+            Log.stop()
+            
+        print scene.RootNode
+       
+    print loadedModel
         
     let testScene =
         let mutable materials = HashMap.empty
@@ -83,7 +115,7 @@ let main _args =
                 
                 let material =  
                     {
-                        Name                = sprintf "%.3f_%.3f" roughness metalness
+                        Name                = Some (sprintf "%.3f_%.3f" roughness metalness)
                         
                         DoubleSided         = true
                         Opaque              = true
@@ -93,9 +125,11 @@ let main _args =
                             
                         Roughness           = roughness
                         RoughnessTexture    = None
+                        RoughnessTextureComponent = 0
                         
                         Metallicness        = metalness
                         MetallicnessTexture = None
+                        MetallicnessTextureComponent = 0
                         
                         EmissiveColor       = C4f.Black
                         EmissiveTexture     = None
@@ -105,17 +139,21 @@ let main _args =
                     }
                 
                 materials <- HashMap.add mid material materials
-                nodes <- { Name = None; Trafo = Some offset; Meshes = [gid]; Children = []; Material = Some mid } :: nodes
+                nodes <- { Name = None; Trafo = Some offset; Meshes = [ { Mesh = gid; Material = Some mid } ]; Children = [] } :: nodes
         
         {
             Materials = materials
             Meshes = geometries
             ImageData = HashMap.empty
-            RootNode = { Name = None; Trafo = None; Meshes = []; Children = nodes; Material = None}
+            RootNode = { Name = None; Trafo = None; Meshes = []; Children = nodes }
         }
         
-    let model1 = testScene
+    GLTF.save "/Users/schorsch/Desktop/bla.glb" loadedModel
+               
+    let model1 =
+        GLTF.loadScene "/Users/schorsch/Desktop/bla.glb"
         
+    let model1 = loadedModel
     let centerTrafo1 =
         Trafo3d.Translation(-model1.BoundingBox.Center) *
         Trafo3d.Scale(5.0 / model1.BoundingBox.Size.NormMax)

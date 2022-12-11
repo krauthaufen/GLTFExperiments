@@ -166,6 +166,9 @@ module Shader =
         member x.HasEmissiveTexture : bool = uniform?Material?HasEmissiveTexture
         member x.HasNormalTexture : bool = uniform?Material?HasNormalTexture
         
+        member x.RoughnessTextureComponent : int = uniform?Material?RoughnessTextureComponent
+        member x.MetallicnessTextureComponent : int = uniform?Material?MetallicnessTextureComponent
+        
         member x.HasNormals : bool = uniform?Mesh?HasNormals
         member x.HasTangents : bool = uniform?Mesh?HasTangents
         member x.HasColors : bool = uniform?Mesh?HasColors
@@ -301,7 +304,7 @@ module Shader =
         // sum.XYZ / sum.W
     [<ReflectedDefinition>] [<Inline>]
     let getR0 (reflectivity : float, metalness : float, baseColor : V3d) =
-        reflectivity * (1.0 - metalness) + baseColor * metalness
+        V3d.III * reflectivity * (1.0 - metalness) + baseColor * metalness
         
     let shade (v : Vertex) =
         fragment {
@@ -316,17 +319,17 @@ module Shader =
             
             let roughness =
                 if uniform.HasRoughnessTexture then
-                    let tv = roughnessTexture.Sample(v.roughCoord).X
+                    let tv = roughnessTexture.Sample(v.roughCoord).[uniform.RoughnessTextureComponent]
                     let uv = eps + uniform.Roughness
-                    tv * uv |> clamp 0.0 0.99
+                    uv * tv |> saturate
                 else
                     uniform.Roughness + eps |> clamp 0.0 0.99
             
             let metalness =
                 if uniform.HasMetallicnessTexture then
-                    let tv = metallicnessTexture.Sample(v.roughCoord).X
+                    let tv = metallicnessTexture.Sample(v.metalCoord).[uniform.MetallicnessTextureComponent]
                     let uv = eps + uniform.Metallicness
-                    tv * uv |> saturate
+                    uv * tv |> saturate
                 else
                     uniform.Metallicness + eps |> saturate
             
@@ -368,7 +371,7 @@ module Shader =
             
             
             
-            let f0 = getR0(0.04, metalness, albedo.XYZ)
+            let f0 = getR0(0.04, metalness, V3d.III) * albedo.XYZ
             let d = trowbridgeReitzNDF nh roughness
             
             let f = fresnel f0 nv roughness
@@ -385,10 +388,10 @@ module Shader =
             let specularDirectTerm =
                 (f * g * d) / (4.0 * nl * nv + eps)
             
-            let brdfDirectOutput = (diffuseDirectTerm + specularDirectTerm) * lambert * dr |> saturate
-            let ambientDiffuse = diffuseIrradiance * (albedo.XYZ / Constant.Pi) * (1.0 - f) * (1.0 - metalness) |> saturate
+            let brdfDirectOutput = (diffuseDirectTerm + specularDirectTerm) * lambert * dr 
+            let ambientDiffuse = diffuseIrradiance * (albedo.XYZ / Constant.Pi) * (1.0 - f) * (1.0 - metalness) 
             
-            let ambientSpecular = specularIrradiance * f |> saturate
+            let ambientSpecular = specularIrradiance * f 
             
             let color = brdfDirectOutput + ambientDiffuse + ambientSpecular
             
@@ -677,11 +680,11 @@ module SceneSg =
             for sem in sems do
                 let semantic =
                     match sem with
-                    | TexCoordSemantic.BaseColor -> Semantic.AlbedoCoordinate
-                    | TexCoordSemantic.Roughness -> Semantic.RoughnessCoordinate
-                    | TexCoordSemantic.Emissive -> Semantic.EmissiveCoordinate
-                    | TexCoordSemantic.Metallicness -> Semantic.MetallicnessCoordinate
-                    | TexCoordSemantic.Normal -> Semantic.NormalCoordinate
+                    | TextureSemantic.BaseColor -> Semantic.AlbedoCoordinate
+                    | TextureSemantic.Roughness -> Semantic.RoughnessCoordinate
+                    | TextureSemantic.Emissive -> Semantic.EmissiveCoordinate
+                    | TextureSemantic.Metallicness -> Semantic.MetallicnessCoordinate
+                    | TextureSemantic.Normal -> Semantic.NormalCoordinate
                     
                 sg <- sg |> Sg.vertexBuffer semantic view
                 
@@ -699,10 +702,22 @@ module SceneSg =
         let textures =
             scene.ImageData |> HashMap.map (fun _ data ->
                 try
-                    use ms = new System.IO.MemoryStream(data)
+                    use ms = new System.IO.MemoryStream(data.Data)
                     let img = PixImage.Load ms
+                    
+                    let img = 
+                        if HashSet.contains TextureSemantic.BaseColor data.Semantics && img.Format = Col.Format.Gray then
+                            img.Visit {
+                                new IPixImageVisitor<PixImage> with
+                                    member x.Visit(img : PixImage<'a>) =
+                                        img.ToFormat(Col.Format.RGBA) :> PixImage
+                            }
+                        else
+                            img
+                    
+                    
                     PixTexture2d(PixImageMipMap [|img|], TextureParams.mipmapped) :> ITexture |> AVal.constant
-                with _ ->
+                with e ->
                     white
             )
  
@@ -725,80 +740,81 @@ module SceneSg =
                 
                 "AlbedoTexture", white
                 "RoughnessTexture", white
+                "RoughnessTextureComponent", AVal.constant 0
                 "MetallicnessTexture", white
+                "MetallicnessTextureComponent", AVal.constant 0
                 "NormalTexture", white
                 "EmissiveTexture", white
             ]
              
-        let rec traverse (hasMaterial : bool) (node : Node) =
+        let rec traverse (node : Node) =
             
-            
-            let mutable hasMaterial = hasMaterial
-            
-            let uniforms = 
-                match node.Material |> Option.bind (fun id -> HashMap.tryFind id scene.Materials) with
-                | Some mat ->
-                    hasMaterial <- true
-                    
-                    let albedoTexture =
-                        match mat.AlbedoTexutre |> Option.bind (fun id -> HashMap.tryFind id textures) with
-                        | Some t -> t
-                        | None -> white
-                        
-                    let roughnessTexture =
-                        match mat.RoughnessTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
-                        | Some t -> t
-                        | None -> white
-                        
-                    let metallicnessTexture =
-                        match mat.MetallicnessTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
-                        | Some t -> t
-                        | None -> white
-                    
-                    let normalTexture =
-                        match mat.NormalTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
-                        | Some t -> t
-                        | None -> white
-                    
-                    let emissiveTexture =
-                        match mat.EmissiveTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
-                        | Some t -> t
-                        | None -> white
-                        
-                    Some (
-                        UniformProvider.ofList [
-                            "AlbedoColor", AVal.constant mat.AlbedoColor :> IAdaptiveValue
-                            "Roughness", AVal.constant mat.Roughness
-                            "Metallicness", AVal.constant mat.Metallicness
-                            "EmissiveColor", AVal.constant mat.EmissiveColor
-                            "NormalTextureScale", AVal.constant mat.NormalTextureScale
-                            
-                            "HasAlbedoTexture", AVal.constant (Option.isSome mat.AlbedoTexutre) 
-                            "HasRoughnessTexture", AVal.constant (Option.isSome mat.RoughnessTexture) 
-                            "HasMetallicnessTexture", AVal.constant (Option.isSome mat.MetallicnessTexture) 
-                            "HasEmissiveTexture", AVal.constant (Option.isSome mat.EmissiveTexture) 
-                            "HasNormalTexture", AVal.constant (Option.isSome mat.NormalTexture) 
-                            
-                            "AlbedoTexture", albedoTexture
-                            "RoughnessTexture", roughnessTexture
-                            "MetallicnessTexture", metallicnessTexture
-                            "NormalTexture", normalTexture
-                            "EmissiveTexture", emissiveTexture
-                        ]
-                    )
-                    
-                    
-                | None ->
-                    None
             
             let cs =
                 match node.Children with
                 | [] -> None
-                | _ -> node.Children |> Seq.map (traverse hasMaterial) |> Sg.ofSeq |> Some
+                | _ -> node.Children |> Seq.map traverse |> Sg.ofSeq |> Some
                 
             let ms =
-                node.Meshes |> List.choose (fun id -> HashMap.tryFind id meshes) |> Sg.ofList |> Some
-                
+                node.Meshes |> List.choose (fun mi ->
+                    match HashMap.tryFind mi.Mesh meshes with
+                    | Some mesh ->
+                        match mi.Material |> Option.bind (fun mid -> HashMap.tryFind mid scene.Materials) with
+                        | Some mat ->
+                            let uniforms = 
+                                let albedoTexture =
+                                    match mat.AlbedoTexutre |> Option.bind (fun id -> HashMap.tryFind id textures) with
+                                    | Some t -> t
+                                    | None -> white
+                                    
+                                let roughnessTexture =
+                                    match mat.RoughnessTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
+                                    | Some t -> t
+                                    | None -> white
+                                    
+                                let metallicnessTexture =
+                                    match mat.MetallicnessTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
+                                    | Some t -> t
+                                    | None -> white
+                                
+                                let normalTexture =
+                                    match mat.NormalTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
+                                    | Some t -> t
+                                    | None -> white
+                                
+                                let emissiveTexture =
+                                    match mat.EmissiveTexture |> Option.bind (fun id -> HashMap.tryFind id textures) with
+                                    | Some t -> t
+                                    | None -> white
+                                    
+                                UniformProvider.ofList [
+                                    "AlbedoColor", AVal.constant mat.AlbedoColor :> IAdaptiveValue
+                                    "Roughness", AVal.constant mat.Roughness
+                                    "Metallicness", AVal.constant mat.Metallicness
+                                    "EmissiveColor", AVal.constant mat.EmissiveColor
+                                    "NormalTextureScale", AVal.constant mat.NormalTextureScale
+                                    
+                                    "HasAlbedoTexture", AVal.constant (Option.isSome mat.AlbedoTexutre) 
+                                    "HasRoughnessTexture", AVal.constant (Option.isSome mat.RoughnessTexture) 
+                                    "HasMetallicnessTexture", AVal.constant (Option.isSome mat.MetallicnessTexture) 
+                                    "HasEmissiveTexture", AVal.constant (Option.isSome mat.EmissiveTexture) 
+                                    "HasNormalTexture", AVal.constant (Option.isSome mat.NormalTexture) 
+                                    
+                                    "AlbedoTexture", albedoTexture
+                                    "RoughnessTexture", roughnessTexture
+                                    "MetallicnessTexture", metallicnessTexture
+                                    "RoughnessTextureComponent", AVal.constant mat.RoughnessTextureComponent
+                                    "MetallicnessTextureComponent", AVal.constant mat.MetallicnessTextureComponent
+                                    "NormalTexture", normalTexture
+                                    "EmissiveTexture", emissiveTexture
+                                ]
+                            Some (Sg.UniformApplicator(uniforms, mesh) :> ISg)
+                        | None ->
+                            Some mesh
+                    | None ->
+                        None
+                ) |> Sg.ofList |> Some
+                    
             let sg =
                 match cs with
                 | Some cs ->
@@ -810,22 +826,17 @@ module SceneSg =
                     | Some ms -> ms
                     | None -> Sg.empty
             
-            let sg = 
-                match uniforms with
-                | Some u -> Sg.UniformApplicator(u, sg) :> ISg
-                | None -> sg
-            
             match node.Trafo with
             | Some t -> Sg.trafo' t sg
             | None -> sg
             
-        let specular, diffuse = Skybox.get "miramar_$.png" |> AVal.force |> DownsampleCube.downsampleCubeMap runtime
+        let specular, diffuse = Skybox.get "chapel_$.png" |> AVal.force |> DownsampleCube.downsampleCubeMap runtime
         
         let specular = specular :> ITexture |> AVal.constant
         let diffuse = diffuse :> ITexture |> AVal.constant
             
         Sg.ofList [
-            Sg.UniformApplicator(defaultMaterial, traverse false scene.RootNode)
+            Sg.UniformApplicator(defaultMaterial, traverse scene.RootNode)
             |> Sg.vertexBufferValue' DefaultSemantic.Normals V3f.OOI
             |> Sg.vertexBufferValue' Semantic.Tangent V4f.IOOI
             |> Sg.vertexBufferValue' Semantic.AlbedoCoordinate V2f.Zero
