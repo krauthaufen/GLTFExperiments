@@ -153,7 +153,7 @@ let main _args =
     let model1 =
         GLTF.loadScene "/Users/schorsch/Desktop/bla.glb"
         
-    let model1 = loadedModel
+    //let model1 = loadedModel
     let centerTrafo1 =
         Trafo3d.Translation(-model1.BoundingBox.Center) *
         Trafo3d.Scale(5.0 / model1.BoundingBox.Size.NormMax)

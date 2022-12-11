@@ -788,7 +788,7 @@ module GLTF =
                 else
                     let s = r.Diagonal
                     let rot = Rot3d.FromM33d(q)
-                    let t = rot.InvTransform (t.TransformPos(V3d.Zero))
+                    let t = t.TransformPos(V3d.Zero)
                     
                     res.Scale <- (V3f s).ToArray()
                     res.Rotation <- [| float32 rot.X; float32 rot.Y; float32 rot.Z; float32 rot.W  |]
